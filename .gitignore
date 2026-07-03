@@ -1,0 +1,17 @@
+# 虛擬環境（每台機器自己 install.bat 產生）
+venv/
+
+# Python 快取
+__pycache__/
+*.pyc
+
+# 執行時產物
+聽打紀錄.txt
+會議錄音/
+*.wav
+*.tmp.wav
+.last-run
+
+# 模型快取（若有人把 HF 快取放進來）
+models/
+.cache/
