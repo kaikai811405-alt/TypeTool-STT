@@ -7,8 +7,6 @@
 
 啟動選單：
     name = choose_engine()  # 互動式，回傳 "sensevoice" 或 "breeze"
-
-裝置：自動偵測；有 NVIDIA CUDA 用 GPU，否則退回 CPU（CPU 可跑但較慢，Breeze 尤甚）。
 """
 import sys
 import os
@@ -41,28 +39,20 @@ def apply_dict(text):
     return text
 
 
-def _has_cuda():
-    try:
-        import torch
-        return torch.cuda.is_available()
-    except Exception:
-        return False
-
-
 MODELS = {
     "1": ("sensevoice", "SenseVoice（快，通用，支援說話人分離）"),
     "2": ("breeze", "Breeze-ASR-25（準，台灣中英夾雜，較慢，無說話人分離）"),
 }
 
 
-def choose_engine(default="sensevoice"):
+def choose_engine(default="breeze"):
     print("=" * 50)
     print("  選擇辨識模型：")
     print("   1) SenseVoice     — 快、通用、可分辨說話人")
     print("   2) Breeze-ASR-25  — 台灣中英夾雜最準，較慢，不分說話人")
     print("=" * 50)
-    c = input("輸入 1 或 2（直接按 Enter 用 1）：").strip()
-    name = MODELS.get(c, ("sensevoice", ""))[0]
+    c = input("輸入 1 或 2（直接按 Enter 用 2）：").strip()
+    name = MODELS.get(c, ("breeze", ""))[0]
     print(f"→ 使用 {name}\n")
     return name
 
@@ -74,14 +64,13 @@ class SenseVoiceEngine:
         from funasr import AutoModel
         self._cc = opencc.OpenCC("s2twp")
         self.want_speaker = want_speaker
-        device = "cuda:0" if _has_cuda() else "cpu"
-        kw = dict(model="iic/SenseVoiceSmall", device=device, disable_update=True)
+        kw = dict(model="iic/SenseVoiceSmall", device="cuda:0", disable_update=True)
         if not short:
             kw["vad_model"] = "fsmn-vad"      # 短句即時輸入不掛 VAD，降延遲
         if want_speaker:
             kw["vad_model"] = "fsmn-vad"
             kw["spk_model"] = "cam++"
-        print(f"載入 SenseVoice…（裝置：{device}）")
+        print("載入 SenseVoice…")
         self.model = AutoModel(**kw)
 
     def _post(self, s):
@@ -109,21 +98,15 @@ class BreezeEngine:
         if want_speaker:
             print("⚠️  Breeze 不支援說話人分離，將改以時間戳分行（不標說話人）。")
         self.want_speaker = want_speaker
-        cuda = torch.cuda.is_available()
-        if not cuda:
-            print("⚠️  未偵測到 CUDA GPU，Breeze 將以 CPU 執行，速度會很慢，建議改用 SenseVoice。")
-        dtype = torch.float16 if cuda else torch.float32
-        print(f"載入 Breeze-ASR-25…（裝置：{'cuda' if cuda else 'cpu'}，首次會下載約 3GB）")
+        print("載入 Breeze-ASR-25…（首次會下載約 3GB）")
         repo = "MediaTek-Research/Breeze-ASR-25"
         proc = WhisperProcessor.from_pretrained(repo)
-        model = WhisperForConditionalGeneration.from_pretrained(repo, torch_dtype=dtype)
-        if cuda:
-            model = model.to("cuda")
-        model = model.eval()
+        model = WhisperForConditionalGeneration.from_pretrained(
+            repo, torch_dtype=torch.float16).to("cuda").eval()
         self.pipe = AutomaticSpeechRecognitionPipeline(
             model=model, tokenizer=proc.tokenizer,
             feature_extractor=proc.feature_extractor,
-            chunk_length_s=0, device=0 if cuda else -1)   # 0=長音檔連續解碼，官方建議
+            chunk_length_s=0, device=0)   # 0=長音檔連續解碼，官方建議
 
     def _load(self, path):
         # 用 ffmpeg 解碼任何格式 → 16k 單聲道 float32（避開 torchaudio/torchcodec 後端問題）
